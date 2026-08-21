@@ -16,7 +16,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: ZIP finden
+      - name: ZIP finden und prüfen
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -24,13 +24,12 @@ jobs:
           ZIP="nischen-explorer-initial-v4_1.zip"
 
           test -f "$ZIP"
-
-          echo "ZIP gefunden:"
-          ls -lh "$ZIP"
-
           unzip -t "$ZIP"
 
-      - name: ZIP vollständig entpacken
+          echo "ZIP gefunden und gültig:"
+          ls -lh "$ZIP"
+
+      - name: ZIP temporär entpacken
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -40,7 +39,6 @@ jobs:
 
           rm -rf "$TMP"
           mkdir -p "$TMP"
-
           unzip -q "$ZIP" -d "$TMP"
 
           echo "Entpackter Inhalt:"
@@ -54,10 +52,7 @@ jobs:
           TMP=".initial-import"
 
           mapfile -t APPS < <(
-            find "$TMP" \
-              -type f \
-              -name "app.py" \
-              -not -path '*/__pycache__/*'
+            find "$TMP"               -type f               -name "app.py"               -not -path '*/__pycache__/*'
           )
 
           if [ "${#APPS[@]}" -ne 1 ]; then
@@ -69,37 +64,19 @@ jobs:
           APP="${APPS[0]}"
           ROOT="$(dirname "$APP")"
 
-          echo "Erkannter Projektroot:"
-          echo "$ROOT"
-
+          echo "Erkannter Projektroot: $ROOT"
           echo "ROOT=$ROOT" >> "$GITHUB_ENV"
 
-      - name: Projektdateien ins Repository übernehmen
+      - name: Projektdateien übernehmen
         shell: bash
         run: |
           set -Eeuo pipefail
 
-          mkdir -p .imported-project
+          # Der ZIP-Inhalt wird in den tatsächlichen Repository-Root importiert.
+          # Bestehende GitHub-Metadaten und Workflows bleiben unangetastet.
+          cp -a "$ROOT"/. .
 
-          cp -a "$ROOT"/. .imported-project/
-
-          echo "Importierte Dateien:"
-          find .imported-project -type f \
-            -not -path '*/__pycache__/*' \
-            -not -path '*/.pytest_cache/*' \
-            -print | sort
-
-      - name: Projekt in Repository-Root verschieben
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-
-          # Nur die importierten Projektdateien übernehmen.
-          cp -a .imported-project/. .
-
-          rm -rf \
-            .initial-import \
-            .imported-project
+          rm -rf .initial-import
 
       - name: Import prüfen
         shell: bash
@@ -110,16 +87,10 @@ jobs:
           test -f requirements.txt
           test -f Dockerfile
 
-          echo
           echo "=== Repository nach Import ==="
-          find . -maxdepth 3 -type f \
-            -not -path './.git/*' \
-            -not -path './.github/*' \
-            -not -path './__pycache__/*' \
-            -not -path './.pytest_cache/*' \
-            -print | sort
+          find . -maxdepth 3 -type f             -not -path './.git/*'             -not -path './.github/*'             -not -path './__pycache__/*'             -not -path './.pytest_cache/*'             -print | sort
 
-      - name: Änderungen committen
+      - name: Änderungen committen und pushen
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -134,7 +105,5 @@ jobs:
             exit 0
           fi
 
-          git commit \
-            -m "chore: import initial nischen explorer"
-
+          git commit -m "chore: import initial nischen explorer"
           git push origin HEAD:${GITHUB_REF_NAME}
