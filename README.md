@@ -1,86 +1,48 @@
-# Nischen-Explorer v4
+# Nischen Explorer – Deployment
 
-Mehrquellen-Analyse für Nischen, Marktchancen und Marktlücken. Der Explorer kombiniert Nachfrage, Pain, Angebot, Wettbewerb, Social-/Plattform-Signale, Commerce-Daten und Web-Evidence.
-
-## Quellen
-
-### Nachfrage / Trends
-- Google Trends
-- Google Trends Related Queries (Top/Rising)
-- Google Trends regional interest
-- DataForSEO Keyword Ideas
-- GDELT / GNews / TheNewsAPI
-- YouTube Data API v3
-- X Posts + X Trends by WOEID
-- Instagram Hashtags über Meta Graph API
-- Pinterest Trends API
-- Reddit
-
-### Angebot / Commerce
-- OpenLibrary
-- Google Books
-- Keepa / Amazon
-- DataForSEO Google Shopping
-- DataForSEO Google Local Finder
-
-### Web-Evidence
-- RSS/Atom-Feeds
-- frei konfigurierbare URL Requests
-- robots.txt-konformer Same-Domain-Crawler
-
-## Architektur
-
-- asyncio/aiohttp für HTTP-I/O
-- synchrone SDKs isoliert über `asyncio.to_thread()`
-- Pydantic-Kanonisierung
-- SQLite WAL / PostgreSQL über SQLAlchemy
-- idempotente Persistenz und Historie
-- Streamlit + Plotly
-- Cache über `st.cache_data`
-
-## Konfiguration
-
-Siehe `.env.example`. Quellen ohne erforderliche Zugangsdaten werden als `disabled` angezeigt und beeinflussen die Messung nicht so, als ob sie einen Nullwert geliefert hätten.
-
-### Wichtige neue Variablen
+## GHCR image
 
 ```text
-YOUTUBE_API_KEY=
-META_ACCESS_TOKEN=
-INSTAGRAM_BUSINESS_USER_ID=
-FACEBOOK_PAGE_IDS=
-META_GRAPH_VERSION=v25.0
-PINTEREST_ACCESS_TOKEN=
-PINTEREST_REGION=DE
-
-DATAFORSEO_SHOPPING_LOCATION_CODE=2276
-DATAFORSEO_SHOPPING_LANGUAGE_CODE=de
-DATAFORSEO_SERVICE_LOCATION_CODE=
-DATAFORSEO_MERCHANT_MAX_POLLS=6
-DATAFORSEO_MERCHANT_POLL_SECONDS=1.5
-
-FEED_URLS=
-URL_REQUESTS=
-CRAWL_URLS=
-CRAWL_MAX_PAGES=20
-CRAWL_MAX_DEPTH=1
-CRAWL_USER_AGENT=Nischen-Explorer/4.0 (+respectful crawler)
+ghcr.io/z3uss3l/nischen-explorer:latest
 ```
 
-`{keyword}` wird in `FEED_URLS` und `URL_REQUESTS` URL-encodiert eingesetzt.
+## Start with Docker Compose
 
-## Plattformgrenzen
-
-- Facebook bietet keine allgemeine globale Public-Post-Hashtag-Suche über die aktuelle Graph-API-Oberfläche. Deshalb wird im Projekt keine solche Funktion vorgetäuscht. Konfigurierte Facebook-Pages können als begrenzte, nachvollziehbare Proxy-Quelle analysiert werden.
-- Instagram Hashtag Discovery setzt einen geeigneten Meta-/Instagram-Zugang und die erforderlichen Berechtigungen voraus.
-- Pinterest Trends ist laut aktueller API-Dokumentation in der Verfügbarkeit eingeschränkt.
-- X Trends erfordern einen Zugang, der den Trends-Endpunkt tatsächlich freischaltet.
-- YouTube API-Aufrufe unterliegen Quoten.
-
-## Tests
+1. Copy `.env.example` to `.env` and add the API credentials you actually use.
+2. Start the published image:
 
 ```bash
-pytest -q tests_smoke.py
+docker compose -f docker-compose.prod.yml pull
+docker compose -f docker-compose.prod.yml up -d
 ```
 
-Die Tests decken Score-Grenzen, Deduplizierung, Pydantic-Validierung, SQLite-WAL/Upsert, Commerce-/Social-Signale sowie Google-Trends-Discovery-Signale ab.
+3. Open:
+
+```text
+http://localhost:8501
+```
+
+The SQLite database is persisted in the `app_data` Docker volume.
+
+## Private GHCR package
+
+If the package is private, authenticate before pulling:
+
+```bash
+echo "$GITHUB_TOKEN" | docker login ghcr.io -u YOUR_GITHUB_USER --password-stdin
+docker compose -f docker-compose.prod.yml pull
+docker compose -f docker-compose.prod.yml up -d
+```
+
+## Direct Docker start
+
+```bash
+docker run -d \
+  --name nischen-explorer \
+  -p 8501:8501 \
+  --env-file .env \
+  -v nischen_explorer_data:/data \
+  -e DATABASE_URL=sqlite:////data/nischen_explorer.db \
+  --restart unless-stopped \
+  ghcr.io/z3uss3l/nischen-explorer:latest
+```
