@@ -100,7 +100,7 @@ jobs:
       - name: Build erfolgreich
         run: |
           echo "=========================================="
-          echo " Nischen Explorer erfolgreich gebaut"
+          echo " Nischen Explorer gebaut..."
           echo "=========================================="
           echo
           echo "Image:"
