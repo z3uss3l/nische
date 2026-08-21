@@ -1,5 +1,6 @@
 from modules.scorer import calculate_gap_score
 from modules.normalization import dedupe_records, normalize_result
+from modules.normalization import consistency_report
 from modules.models import SourceResult
 from modules.web_sources import _feed_entries
 from modules import db
@@ -29,6 +30,16 @@ def test_dedupe_keeps_same_id_from_different_sources():
         {"id": "1", "source": "y", "kind": "feed"},
     ])
     assert len(out) == 2
+
+
+def test_consistency_report_matches_keywords_and_cross_source_duplicates():
+    report = consistency_report("solar battery", [
+        {"id": "1", "source": "A", "kind": "news", "title": "Solar battery"},
+        {"id": "2", "source": "B", "kind": "news", "title": "Solar battery", "url": "https://example.test/x"},
+        {"id": "3", "source": "C", "kind": "news", "title": "Other", "url": "https://example.test/x"},
+    ])
+    assert report["keyword_matches"] == 2
+    assert report["duplicate_count"] == 1
 
 
 def test_pydantic_validation_counts_bad_records():

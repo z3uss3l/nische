@@ -22,6 +22,27 @@ async def fetch_gdelt(keyword, days=7, timeout=15):
     except Exception as exc:
         return SourceResult("GDELT", "error", error=str(exc))
 
+
+async def fetch_hacker_news(keyword, days=30, timeout=15):
+    try:
+        data, latency = await request_json_async(
+            "GET", "https://hn.algolia.com/api/v1/search",
+            params={"query": keyword, "tags": "story", "hitsPerPage": 50},
+            timeout=timeout,
+        )
+        records = [{
+            "id": str(item.get("objectID") or item.get("story_url") or ""),
+            "source": "Hacker News", "kind": "social",
+            "title": item.get("title") or "", "text": item.get("story_text") or "",
+            "url": item.get("url") or item.get("story_url") or "",
+            "date": item.get("created_at") or "", "score": item.get("points") or 0,
+            "comments": item.get("num_comments") or 0,
+        } for item in data.get("hits", [])]
+        return SourceResult("Hacker News", "ok" if records else "empty", records,
+                            latency_ms=latency, total_available=data.get("nbHits"))
+    except Exception as exc:
+        return SourceResult("Hacker News", "error", error=str(exc))
+
 async def fetch_gnews(keyword, days=7, language="de", country="de", timeout=15):
     key = os.getenv("GNEWS_API_KEY")
     if not key: return SourceResult("GNews", "disabled", error="GNEWS_API_KEY fehlt")

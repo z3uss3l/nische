@@ -1,4 +1,5 @@
 import json
+import os
 from datetime import datetime, timezone
 import pandas as pd
 import plotly.express as px
@@ -6,11 +7,15 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from modules.utils import load_env, get_config, normalize_keyword, slugify
-from modules.pipeline import run_analysis
+from modules.pipeline import SOURCE_NAMES, run_analysis
 from modules.normalization import source_summary
 from modules import db
 
 load_env(); config = get_config()
+DASHBOARD_SECTIONS = ["Übersicht", "Nachfrage & Trends", "Social & Hashtags",
+                      "Angebot & SEO", "Commerce & Dienste", "Web & Feeds",
+                      "Historie", "Quellenqualität", "Rohdaten"]
+preferences = db.get_dashboard_preferences(DASHBOARD_SECTIONS)
 st.set_page_config(page_title="Nischen-Explorer", page_icon="◈", layout="wide", initial_sidebar_state="expanded")
 
 @st.cache_data(ttl=int(config.get("CACHE_TTL_SECONDS") or 900), show_spinner=False)
@@ -33,6 +38,11 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+if preferences["theme"] == "light":
+    st.markdown("<style>:root { color-scheme: light; } [data-testid='stAppViewContainer'] { background: #f4f6f8; }</style>", unsafe_allow_html=True)
+elif preferences["theme"] == "research":
+    st.markdown("<style>[data-testid='stAppViewContainer'] { background: radial-gradient(circle at 80% 0%, #173b3b 0%, #071316 42%, #05090b 100%); }</style>", unsafe_allow_html=True)
+
 st.markdown('<div class="hero"><h1>◈ Nischen- & Marktlücken-Explorer</h1><p>Mehrquellen-Analyse für Nachfrage, Pain, Angebot, Wettbewerb und Trenddynamik — mit Provenienz, Fehlerstatus und Konsistenzprüfung.</p></div>', unsafe_allow_html=True)
 
 # --- Controls
@@ -46,28 +56,57 @@ with st.sidebar:
     if st.button("↻ Cache leeren", use_container_width=True):
         st.cache_data.clear(); st.rerun()
     st.divider()
-    st.caption("Datenquellen")
-    status = {
-        "GDELT": True, "OpenLibrary": True, "Google Books": True, "Google Trends": True, "Google Trends Related": True, "Google Trends Regions": True,
-        "GNews": bool(config.get("GNEWS_API_KEY")), "TheNewsAPI": bool(config.get("THENEWS_API_KEY")),
-        "Reddit": bool(config.get("REDDIT_CLIENT_ID") and config.get("REDDIT_SECRET")),
-        "X": bool(config.get("X_BEARER_TOKEN")), "X Trends": bool(config.get("X_BEARER_TOKEN")),
-        "YouTube": bool(config.get("YOUTUBE_API_KEY")),
-        "Instagram Hashtags": bool(config.get("META_ACCESS_TOKEN") and config.get("INSTAGRAM_BUSINESS_USER_ID")),
-        "Facebook Pages": bool(config.get("META_ACCESS_TOKEN") and config.get("FACEBOOK_PAGE_IDS")),
-        "Pinterest Trends": bool(config.get("PINTEREST_ACCESS_TOKEN")),
-        "DataForSEO": bool(config.get("DATAFORSEO_USERNAME") and config.get("DATAFORSEO_PASSWORD")),
-        "Google Shopping": bool(config.get("DATAFORSEO_USERNAME") and config.get("DATAFORSEO_PASSWORD")),
-        "Local Services": bool(config.get("DATAFORSEO_USERNAME") and config.get("DATAFORSEO_PASSWORD") and config.get("DATAFORSEO_SERVICE_LOCATION_CODE")),
-        "Configured Feeds": bool(config.get("FEED_URLS")), "Configured URLs": bool(config.get("URL_REQUESTS")),
-        "Web Crawler": bool(config.get("CRAWL_URLS")),
-        "Keepa": bool(config.get("KEEPA_API_KEY")),
-        "Octolens": bool(config.get("OCTOLENS_API_KEY") and config.get("OCTOLENS_ENDPOINT")),
-        "XPOZ": bool(config.get("XPOZ_API_KEY") and config.get("XPOZ_ENDPOINT")),
-        "SnitchFeed": bool(config.get("SNITCHFEED_API_KEY") and config.get("SNITCHFEED_ENDPOINT")),
-    }
-    for name, active in status.items():
-        st.markdown(f"<span class='badge'>{'●' if active else '○'} {name}</span>", unsafe_allow_html=True)
+    with st.expander("Dashboard-Pflege", expanded=False):
+        with st.form("dashboard_preferences"):
+            visible_sections = st.multiselect(
+                "Sichtbare Bereiche", DASHBOARD_SECTIONS,
+                default=[section for section in preferences["visible_sections"] if section in DASHBOARD_SECTIONS],
+            )
+            categories = st.text_input("Kategorien (kommagetrennt)", ", ".join(preferences["categories"]))
+            attributes = st.text_input("Attribute (kommagetrennt)", ", ".join(preferences["attributes"]))
+            theme = st.selectbox("Inhaltsthema", ["night", "light", "research"],
+                                 index=["night", "light", "research"].index(preferences["theme"]) if preferences["theme"] in {"night", "light", "research"} else 0)
+            save_dashboard = st.form_submit_button("Dashboard speichern")
+        if save_dashboard:
+            db.save_dashboard_preferences(
+                visible_sections or ["Übersicht"],
+                [item.strip() for item in categories.split(",") if item.strip()],
+                [item.strip() for item in attributes.split(",") if item.strip()],
+                theme,
+            )
+            st.session_state["dashboard_preferences"] = db.get_dashboard_preferences(DASHBOARD_SECTIONS)
+            st.success("Dashboard-Einstellungen gespeichert.")
+    with st.expander("Quellenpflege", expanded=False):
+        health = db.list_source_health(SOURCE_NAMES)
+        health_df = pd.DataFrame(health)
+        health_df["ampel"] = health_df["status"].map({
+            "ok": "🟢 erreichbar", "empty": "🟢 erreichbar, leer",
+            "error": "🔴 Fehler", "disabled": "⚪ deaktiviert",
+            "unknown": "🟡 noch nicht geprüft",
+        }).fillna("🟡 unbekannt")
+        health_df["last_fetched_at"] = health_df["last_fetched_at"].fillna("-")
+        health_df["last_checked_at"] = health_df["last_checked_at"].fillna("-")
+        edited = st.data_editor(
+            health_df[["enabled", "source", "ampel", "last_fetched_at", "last_checked_at", "latency_ms", "last_error"]],
+            hide_index=True, use_container_width=True,
+            column_config={"enabled": st.column_config.CheckboxColumn("aktiv"), "source": st.column_config.TextColumn("Quelle", disabled=True), "ampel": st.column_config.TextColumn("Erreichbarkeit", disabled=True)},
+            disabled=["source", "ampel", "last_fetched_at", "last_checked_at", "latency_ms", "last_error"],
+            key="source_health_editor",
+        )
+        st.caption("Grün = erfolgreich geprüft, Rot = letzter Abruf fehlgeschlagen, Grau = deaktiviert. Zeitstempel sind UTC.")
+        with st.form("source_configuration"):
+            feed_urls = st.text_area("Feed-URLs (kommagetrennt)", os.getenv("FEED_URLS", ""))
+            request_urls = st.text_area("Abruf-URLs (kommagetrennt)", os.getenv("URL_REQUESTS", ""))
+            crawl_urls = st.text_area("Crawler-Startseiten (kommagetrennt)", os.getenv("CRAWL_URLS", ""))
+            save_sources = st.form_submit_button("Quellen speichern und Cache leeren", type="primary")
+        if save_sources:
+            for _, row in edited.iterrows():
+                db.set_source_enabled(row["source"], row["enabled"])
+            os.environ["FEED_URLS"] = feed_urls.strip()
+            os.environ["URL_REQUESTS"] = request_urls.strip()
+            os.environ["CRAWL_URLS"] = crawl_urls.strip()
+            st.cache_data.clear()
+            st.success("Quellenkonfiguration gespeichert. Der nächste Lauf verwendet die neuen Einstellungen.")
 
 if run and keyword:
     with st.spinner("Quellen parallel abfragen, normalisieren und prüfen …"):
@@ -87,6 +126,7 @@ if not analysis:
 
 meta = st.session_state["analysis_meta"]
 results = analysis["results"]; score = analysis["score"]; records = analysis["records"]
+consistency = analysis.get("consistency", {})
 summary = pd.DataFrame(source_summary(results))
 if st.session_state.get("analysis_saved") is False:
     st.error("Die Analyse ist sichtbar, konnte aber nicht in der Datenbank gespeichert werden.")
@@ -106,16 +146,18 @@ if errors:
 
 # --- filters
 with st.expander("Filter & Ansicht", expanded=True):
-    fcols = st.columns([1.2, 1.2, 1.5, 1.5, 1.5])
+    fcols = st.columns([1.1, 1.1, 1.1, 1.4, 1.2, 1.3])
     source_options = sorted({r.get("source", "") for r in records if r.get("source")})
     selected_sources = fcols[0].multiselect("Quellen", source_options, default=source_options)
     kinds = sorted({r.get("kind", "") for r in records if r.get("kind")})
     selected_kinds = fcols[1].multiselect("Datentyp", kinds, default=kinds)
-    text_filter = fcols[2].text_input("Textfilter", placeholder="Titel, Keyword, Text …")
-    min_score = fcols[3].number_input("Mindest-Engagement", min_value=0, value=0, step=1)
-    sort_by = fcols[4].selectbox("Sortierung", ["Relevanz/Score", "Neueste", "Engagement"])
+    category_options = preferences["categories"] or kinds
+    selected_categories = fcols[2].multiselect("Kategorien", category_options, default=category_options)
+    text_filter = fcols[3].text_input("Textfilter", placeholder="Titel, Keyword, Text …")
+    min_score = fcols[4].number_input("Mindest-Engagement", min_value=0, value=0, step=1)
+    sort_by = fcols[5].selectbox("Sortierung", ["Relevanz/Score", "Neueste", "Engagement"])
 
-filtered = [r for r in records if r.get("source") in selected_sources and r.get("kind") in selected_kinds]
+filtered = [r for r in records if r.get("source") in selected_sources and r.get("kind") in selected_kinds and (r.get("category") or r.get("kind")) in selected_categories]
 if text_filter:
     q = text_filter.lower(); filtered = [r for r in filtered if q in json.dumps(r, ensure_ascii=False).lower()]
 if min_score:
@@ -128,9 +170,15 @@ else:
     filtered.sort(key=lambda r: (r.get("intent_confidence") or 0, r.get("relevance") or 0, r.get("score") or 0), reverse=True)
 
 # --- Tabs
-tabs = st.tabs(["Übersicht", "Nachfrage & Trends", "Social & Hashtags", "Angebot & SEO", "Commerce & Dienste", "Web & Feeds", "Historie", "Quellenqualität", "Rohdaten"])
+visible_sections = st.session_state.get("dashboard_preferences", preferences)["visible_sections"]
+visible_sections = [section for section in DASHBOARD_SECTIONS if section in visible_sections] or ["Übersicht"]
+tabs = st.tabs(visible_sections)
+tab_by_section = dict(zip(visible_sections, tabs))
+hidden_tab = st.container()
+for section in DASHBOARD_SECTIONS:
+    tab_by_section.setdefault(section, hidden_tab)
 
-with tabs[0]:
+with tab_by_section["Übersicht"]:
     c1, c2 = st.columns([1.15, 1])
     with c1:
         st.subheader("Opportunity-Matrix")
@@ -152,6 +200,13 @@ with tabs[0]:
         st.caption(f"Analyse: {meta['keyword']} · {meta['region']} · {meta['days']} Tage · {meta['timestamp'][:19]} UTC")
 
     st.subheader("Konsistenzprüfung")
+    consistency_cols = st.columns(4)
+    consistency_cols[0].metric("Keyword-Treffer", f"{consistency.get('keyword_matches', 0)}/{consistency.get('records', 0)}")
+    consistency_cols[1].metric("Trefferquote", f"{consistency.get('keyword_match_rate', 0):.0%}")
+    consistency_cols[2].metric("Dublettengruppen", consistency.get("duplicate_count", 0))
+    consistency_cols[3].metric("Pflichtfelder fehlen", consistency.get("missing_required_fields", 0))
+    if consistency.get("duplicate_count"):
+        st.warning("Quellenübergreifende Dubletten wurden erkannt und für die Prüfung markiert.")
     checks = []
     trend_points = score["trend_points"]
     keyword_count = score["keyword_count"]
@@ -165,7 +220,7 @@ with tabs[0]:
     for label, passed, detail in checks:
         st.write(("✓" if passed else "⚠") + f" **{label}** — {detail}")
 
-with tabs[1]:
+with tab_by_section["Nachfrage & Trends"]:
     st.subheader("Google Trends")
     trend_records = next((r.records for r in results if r.source == "Google Trends"), [])
     if trend_records:
@@ -206,7 +261,7 @@ with tabs[1]:
         st.dataframe(seo[cols].head(100), use_container_width=True, hide_index=True)
     else: st.info("Keine DataForSEO-Daten verfügbar.")
 
-with tabs[2]:
+with tab_by_section["Social & Hashtags"]:
     st.subheader("Plattform-Trends & Hashtags")
     platform = pd.DataFrame([r for r in filtered if r.get("kind") == "hashtag_trend"])
     if not platform.empty:
@@ -224,7 +279,7 @@ with tabs[2]:
         display = [c for c in ["source","subreddit","platform","title","text","intent","intent_confidence","score","comments","likes","date","url"] if c in social.columns]
         st.dataframe(social[display].head(200), use_container_width=True, hide_index=True)
 
-with tabs[3]:
+with tab_by_section["Angebot & SEO"]:
     books = pd.DataFrame([r for r in filtered if r.get("kind") == "book"])
     products = pd.DataFrame([r for r in filtered if r.get("kind") == "product"])
     a,b = st.columns(2)
@@ -241,7 +296,7 @@ with tabs[3]:
             st.dataframe(products[cols], use_container_width=True, hide_index=True)
         else: st.info("Keepa nicht konfiguriert oder keine Treffer.")
 
-with tabs[4]:
+with tab_by_section["Commerce & Dienste"]:
     shopping = pd.DataFrame([r for r in filtered if r.get("kind") == "price_offer"])
     services = pd.DataFrame([r for r in filtered if r.get("kind") == "service"])
     a, b = st.columns(2)
@@ -267,7 +322,7 @@ with tabs[4]:
             service_cols = [c for c in ["rank","title","rating","reviews","address","phone","url"] if c in services.columns]
             st.dataframe(services[service_cols].head(200), use_container_width=True, hide_index=True)
 
-with tabs[5]:
+with tab_by_section["Web & Feeds"]:
     feeds = pd.DataFrame([r for r in filtered if r.get("kind") in {"feed","web"}])
     st.subheader("Feeds, URL-Requests & Crawler")
     if feeds.empty:
@@ -277,7 +332,7 @@ with tabs[5]:
         st.dataframe(feeds[web_cols].head(500), use_container_width=True, hide_index=True)
         st.caption("Crawler arbeitet konservativ: robots.txt, Same-Domain-Grenze, Tiefen-/Seitenlimit und kein Anti-Bot-/Login-Bypass.")
 
-with tabs[6]:
+with tab_by_section["Historie"]:
     st.subheader("Score-Historie")
     history = pd.DataFrame(db.recent_history(meta["keyword"], 40))
     if history.empty:
@@ -290,7 +345,7 @@ with tabs[6]:
         st.plotly_chart(fig, use_container_width=True)
         st.dataframe(history.sort_values("timestamp", ascending=False), use_container_width=True, hide_index=True)
 
-with tabs[7]:
+with tab_by_section["Quellenqualität"]:
     st.subheader("Quellenqualität & Provenienz")
     st.dataframe(summary, use_container_width=True, hide_index=True)
     fig = px.bar(summary, x="source", y="records", color="status", text_auto=True)
@@ -299,7 +354,7 @@ with tabs[7]:
     with st.expander("Warum diese Anzeige wichtig ist"):
         st.write("Deaktivierte, leere und fehlerhafte Quellen werden getrennt behandelt. Ein fehlender API-Key wird nicht als 'keine Nachfrage' interpretiert. Laufzeit, Abrufzeitpunkt und Fehler werden pro Quelle gespeichert.")
 
-with tabs[8]:
+with tab_by_section["Rohdaten"]:
     st.subheader(f"Gefilterte Datensätze · {len(filtered):,}")
     st.dataframe(pd.DataFrame(filtered).head(500), use_container_width=True, hide_index=True)
     export = pd.DataFrame(filtered).to_csv(index=False).encode("utf-8")
