@@ -5,14 +5,6 @@ on:
     branches:
       - main
 
-  workflow_run:
-    workflows:
-      - Initial ZIP Import
-    types:
-      - completed
-    branches:
-      - main
-
   workflow_dispatch:
 
 permissions:
@@ -24,20 +16,11 @@ env:
 
 jobs:
   build:
-    # workflow_run must only build after a successful import.
-    if: >
-      github.event_name != 'workflow_run' ||
-      github.event.workflow_run.conclusion == 'success'
-
     runs-on: ubuntu-latest
 
     steps:
       - name: Repository auschecken
         uses: actions/checkout@v4
-        with:
-          # For workflow_run, build exactly the commit produced by import.yml.
-          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
-          fetch-depth: 0
 
       - name: Projektstruktur prüfen
         shell: bash
@@ -49,7 +32,11 @@ jobs:
           test -f Dockerfile
 
           echo "=== Projektstruktur ==="
-          find . -maxdepth 3 -type f             -not -path './.git/*'             -not -path './.github/*'             -not -path './__pycache__/*'             -not -path './.pytest_cache/*'             -print | sort
+          find . -maxdepth 3 -type f \
+            -not -path './.git/*' \
+            -not -path './.github/*' \
+            -not -path './__pycache__/*' \
+            -print | sort
 
       - name: Python einrichten
         uses: actions/setup-python@v5
