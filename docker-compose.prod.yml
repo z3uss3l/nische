@@ -1,0 +1,16 @@
+services:
+  app:
+    image: ${NISCHEN_IMAGE:-ghcr.io/z3uss3l/nischen-explorer}:latest
+    pull_policy: always
+    ports:
+      - "${NISCHEN_PORT:-8501}:8501"
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: sqlite:////data/nischen_explorer.db
+    volumes:
+      - app_data:/data
+    restart: unless-stopped
+
+volumes:
+  app_data:
