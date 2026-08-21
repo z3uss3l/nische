@@ -50,7 +50,9 @@ def test_sqlite_wal_and_upsert(tmp_path, monkeypatch):
     assert db.save_analysis("test", "DE", 7, {"score": 6, "confidence": .9}, [], [
         {"canonical_id":"abc","source":"Test","kind":"x","title":"B"}
     ])
-    assert len(db.recent_history("test")) == 2
+    history = db.recent_history("test")
+    assert len(history) == 2
+    assert [row["score"] for row in history] == [5, 6]
 
 import asyncio
 from modules.scorer import calculate_gap_score

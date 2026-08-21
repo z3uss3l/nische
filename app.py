@@ -75,7 +75,10 @@ if run and keyword:
         st.session_state["analysis"] = result
         st.session_state["analysis_meta"] = {"keyword": keyword, "region": region, "days": days,
                                                "timestamp": datetime.now(timezone.utc).isoformat()}
-        db.save_analysis(keyword, region, days, result["score"], source_summary(result["results"]), result.get("records", []))
+        st.session_state["analysis_saved"] = db.save_analysis(
+            keyword, region, days, result["score"],
+            source_summary(result["results"]), result.get("records", []),
+        )
 
 analysis = st.session_state.get("analysis")
 if not analysis:
@@ -85,6 +88,8 @@ if not analysis:
 meta = st.session_state["analysis_meta"]
 results = analysis["results"]; score = analysis["score"]; records = analysis["records"]
 summary = pd.DataFrame(source_summary(results))
+if st.session_state.get("analysis_saved") is False:
+    st.error("Die Analyse ist sichtbar, konnte aber nicht in der Datenbank gespeichert werden.")
 
 # --- global data quality banner
 ok = int((summary.status == "ok").sum()); errors = int((summary.status == "error").sum()); disabled = int((summary.status == "disabled").sum())

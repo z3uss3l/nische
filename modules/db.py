@@ -1,3 +1,4 @@
+import logging
 import os
 from datetime import datetime, timezone
 from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, JSON, Text, Index, event, select
@@ -34,6 +35,7 @@ class TrendRecord(Base):
     __table_args__ = (Index("ix_trend_source_kind_last_seen", "source", "kind", "last_seen"),)
 
 _ENGINE = None
+logger = logging.getLogger(__name__)
 
 def get_db_engine():
     global _ENGINE
@@ -79,6 +81,7 @@ def save_analysis(keyword, region, days, score, source_snapshot, records=None):
                                             score=r.get("score"), payload=r, first_seen=now, last_seen=now))
         return True
     except Exception:
+        logger.exception("Analyse konnte nicht in der Datenbank gespeichert werden")
         return False
 
 def recent_history(keyword, limit=30):
