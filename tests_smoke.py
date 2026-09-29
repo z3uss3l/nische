@@ -264,3 +264,35 @@ def test_probe_scheduler_prioritizes_high_information_candidates():
     cold=prioritize(demand_strength=.1,acceleration=.1,anomaly=.1,gap_confidence=.1,uncertainty=.1)
     assert hot.priority > cold.priority
     assert hot.cadence_hours < cold.cadence_hours
+
+
+def test_provider_policy_hard_caps_web_fetches():
+    from datetime import date
+    from modules.provider_policy import ProviderPolicy, AccessMode, may_fetch
+    p=ProviderPolicy("shop",AccessMode.WEB_FETCH,max_fetches_per_day=2)
+    d=date(2026,9,30)
+    assert may_fetch(p,[d],d)
+    assert not may_fetch(p,[d,d],d)
+
+
+def test_refresh_only_triggers_recompute_on_change():
+    from datetime import date
+    from modules.provider_policy import ProviderPolicy, AccessMode, canonical_hash
+    from modules.refresh_orchestrator import refresh_provider
+    p=ProviderPolicy("feed",AccessMode.PUBLIC_FEED,max_fetches_per_day=2)
+    payload={"offers":[1,2,3]}
+    old=canonical_hash(payload)
+    same=refresh_provider(policy=p,fetch=lambda:payload,previous_hash=old,successful_fetch_dates=[],today=date(2026,9,30))
+    assert same.status=="ok" and not same.changed and same.queued==()
+    changed=refresh_provider(policy=p,fetch=lambda:{"offers":[1,2,3,4]},previous_hash=old,successful_fetch_dates=[],today=date(2026,9,30))
+    assert changed.changed and "reclassify_gaps" in changed.queued
+
+
+def test_refresh_failure_never_becomes_empty_snapshot():
+    from datetime import date
+    from modules.provider_policy import ProviderPolicy, AccessMode
+    from modules.refresh_orchestrator import refresh_provider
+    p=ProviderPolicy("shop",AccessMode.WEB_FETCH)
+    def boom(): raise TimeoutError("slow")
+    r=refresh_provider(policy=p,fetch=boom,previous_hash=None,successful_fetch_dates=[],today=date(2026,9,30))
+    assert r.status=="error" and not r.changed
