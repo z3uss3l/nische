@@ -150,3 +150,71 @@ def delete_view(name: str):
     Session = _session()
     with Session.begin() as s:
         s.execute(delete(SavedViewRow).where(SavedViewRow.name == name))
+
+
+class CandidateRow(V5Base):
+    __tablename__ = "opportunity_candidates"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    candidate_id: Mapped[str] = mapped_column(String(160), unique=True, index=True)
+    subject: Mapped[str] = mapped_column(String(300), index=True)
+    lens: Mapped[str] = mapped_column(String(80), index=True, default="generic")
+    region: Mapped[str] = mapped_column(String(40), index=True, default="DE")
+    state: Mapped[str] = mapped_column(String(40), index=True, default="discovered")
+    priority: Mapped[float] = mapped_column(Float, default=0.0, index=True)
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
+
+
+class ProbeResultRow(V5Base):
+    __tablename__ = "probe_results"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    candidate_id: Mapped[str] = mapped_column(String(160), index=True)
+    step_id: Mapped[str] = mapped_column(String(200), index=True)
+    provider: Mapped[str] = mapped_column(String(100), index=True)
+    status: Mapped[str] = mapped_column(String(40), index=True)
+    observed_at: Mapped[datetime] = mapped_column(DateTime, index=True)
+    result_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    relevant_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    __table_args__ = (Index("ix_probe_candidate_provider_time", "candidate_id", "provider", "observed_at"),)
+
+
+def upsert_candidate(candidate: dict[str, Any], *, state="discovered", priority=0.0):
+    Session = _session()
+    with Session.begin() as s:
+        row=s.scalar(select(CandidateRow).where(CandidateRow.candidate_id==candidate["candidate_id"]))
+        if row:
+            row.subject=candidate["subject"]; row.lens=candidate.get("lens","generic")
+            row.region=candidate.get("region","DE"); row.state=state; row.priority=priority
+            row.payload=candidate; row.updated_at=datetime.now(timezone.utc)
+        else:
+            s.add(CandidateRow(candidate_id=candidate["candidate_id"], subject=candidate["subject"],
+                lens=candidate.get("lens","generic"), region=candidate.get("region","DE"),
+                state=state, priority=priority, payload=candidate))
+
+
+def record_probe_result(candidate_id: str, result: dict[str, Any]):
+    Session=_session()
+    observed=result.get("observed_at") or datetime.now(timezone.utc)
+    if isinstance(observed,str): observed=datetime.fromisoformat(observed.replace("Z","+00:00"))
+    with Session.begin() as s:
+        s.add(ProbeResultRow(candidate_id=candidate_id, step_id=result["step_id"],
+            provider=result["provider"], status=str(result["status"]), observed_at=observed,
+            result_count=result.get("result_count"), relevant_count=result.get("relevant_count"), payload=result))
+
+
+def candidate_probe_history(candidate_id: str, limit=1000):
+    Session=_session()
+    with Session() as s:
+        rows=s.scalars(select(ProbeResultRow).where(ProbeResultRow.candidate_id==candidate_id)
+            .order_by(ProbeResultRow.observed_at.desc()).limit(limit)).all()
+        return [r.payload for r in rows]
+
+
+def list_candidates(limit=1000):
+    Session=_session()
+    with Session() as s:
+        rows=s.scalars(select(CandidateRow).order_by(CandidateRow.priority.desc(), CandidateRow.updated_at.desc()).limit(limit)).all()
+        return [{"candidate_id":r.candidate_id,"subject":r.subject,"lens":r.lens,"region":r.region,
+                 "state":r.state,"priority":r.priority,"updated_at":r.updated_at,**(r.payload or {})} for r in rows]
