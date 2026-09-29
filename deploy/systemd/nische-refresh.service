@@ -1,0 +1,10 @@
+[Unit]
+Description=Nische local-first market data refresh
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/nische
+ExecStart=/usr/bin/env python3 scripts/refresh_market_data.py
+Nice=10

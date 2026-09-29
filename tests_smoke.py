@@ -155,3 +155,144 @@ def test_procurement_is_real_demand_signal():
     )
     assert score["procurement_notices"] == 25
     assert score["demand"] > 0
+
+
+def test_temporal_signal_enrichment_is_point_in_time():
+    from datetime import datetime, timezone, timedelta
+    from modules.intelligence_models import TemporalSignal
+    from modules.temporal_intelligence import enrich_signal
+
+    now = datetime(2026, 9, 30, tzinfo=timezone.utc)
+    history = [
+        TemporalSignal(signal_id=f"s{i}", timestamp=now-timedelta(days=i), source="test",
+                       domain="weather", metric="temperature", value=20+i, unit="C",
+                       region="DE-BY", subject="market")
+        for i in range(1, 8)
+    ]
+    future = TemporalSignal(signal_id="future", timestamp=now+timedelta(days=1), source="test",
+                            domain="weather", metric="temperature", value=99, region="DE-BY",
+                            subject="market")
+    current = TemporalSignal(signal_id="now", timestamp=now, source="test", domain="weather",
+                             metric="temperature", value=30, unit="C", region="DE-BY", subject="market")
+    enriched = enrich_signal(current, history + [future])
+    assert enriched.baseline < 99
+    assert enriched.change_1d is not None
+    assert 0 <= enriched.percentile <= 1
+
+
+def test_lagged_relationship_does_not_claim_causality():
+    from datetime import datetime, timezone, timedelta
+    from modules.intelligence_models import TemporalSignal
+    from modules.temporal_intelligence import lagged_correlation
+
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    x = [TemporalSignal(signal_id=f"x{i}", timestamp=start+timedelta(days=i), source="x",
+                        domain="a", metric="x", value=float(i), subject="m") for i in range(20)]
+    y = [TemporalSignal(signal_id=f"y{i}", timestamp=start+timedelta(days=i+2), source="y",
+                        domain="b", metric="y", value=float(i), subject="m") for i in range(20)]
+    rels = lagged_correlation(x, y, 5)
+    best = max(rels, key=lambda r: abs(r["correlation"]))
+    assert best["sample_size"] >= 5
+    assert "causal" not in best
+
+
+def test_v5_filter_removes_irrelevant_records():
+    from datetime import date, datetime
+    from modules.dashboard_v5 import filter_records
+    rows = [
+        {"title":"Goldpreis", "domain":"finance", "region":"DE", "evidence":"official", "timestamp":datetime(2026,9,1)},
+        {"title":"T-Shirt Motiv", "domain":"commerce", "region":"DE", "evidence":"observed", "timestamp":datetime(2026,9,1)},
+    ]
+    out = filter_records(rows, query="gold", domains=["finance"], start=date(2026,8,1), end=date(2026,10,1))
+    assert len(out) == 1
+    assert out[0]["title"] == "Goldpreis"
+
+
+def test_v5_saved_views_roundtrip(tmp_path, monkeypatch):
+    from modules import db
+    from modules import intelligence_store as store
+    dbfile = tmp_path / "views.db"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{dbfile}")
+    db._ENGINE = None
+    store.init_v5()
+    store.save_view("Mein Markt", {"query":"shirt", "domains":["commerce"]})
+    assert store.list_saved_views()["Mein Markt"]["query"] == "shirt"
+    store.delete_view("Mein Markt")
+    assert "Mein Markt" not in store.list_saved_views()
+
+
+def test_gap_engine_requires_valid_independent_observations():
+    from modules.opportunity_verification import ProbeResult, ProbeStatus, GapKind, classify_gap
+    failed=[ProbeResult("amazon:exact","amazon","x",ProbeStatus.ERROR,error="timeout")]
+    assert classify_gap(failed).kind == GapKind.DATA_UNKNOWN
+    rows=[
+        ProbeResult("amazon:exact","amazon","x",ProbeStatus.ZERO,result_count=0,relevant_count=0),
+        ProbeResult("amazon:semantic","amazon","x",ProbeStatus.ZERO,result_count=0,relevant_count=0),
+        ProbeResult("ebay:exact","ebay","x",ProbeStatus.ZERO,result_count=0,relevant_count=0),
+        ProbeResult("ebay:semantic","ebay","x",ProbeStatus.ZERO,result_count=0,relevant_count=0),
+    ]
+    gap=classify_gap(rows)
+    assert gap.kind == GapKind.CONFIRMED_ZERO
+    assert set(gap.providers) == {"amazon","ebay"}
+
+
+def test_gap_engine_distinguishes_semantic_gap():
+    from modules.opportunity_verification import ProbeResult, ProbeStatus, GapKind, classify_gap
+    rows=[
+        ProbeResult("amazon:exact","amazon","specific x",ProbeStatus.ZERO,result_count=0,relevant_count=0),
+        ProbeResult("amazon:semantic","amazon","specific x",ProbeStatus.OK,result_count=9,relevant_count=3),
+        ProbeResult("ebay:exact","ebay","specific x",ProbeStatus.ZERO,result_count=0,relevant_count=0),
+        ProbeResult("ebay:semantic","ebay","specific x",ProbeStatus.OK,result_count=5,relevant_count=2),
+    ]
+    assert classify_gap(rows).kind == GapKind.SEMANTIC_GAP
+
+
+def test_query_ladder_is_reproducible():
+    from modules.opportunity_verification import Candidate, build_query_ladder
+    c=Candidate("c1","portable solar widget",lens="marketplace")
+    plan=build_query_ladder(c,["amazon","ebay"],identifiers={"gtin":"123"},synonyms=["solar widget"],substitutes=["power station"])
+    modes=[s.mode for s in plan.steps]
+    assert modes.count("identifier")==2
+    assert modes.count("exact")==2
+    assert modes.count("semantic")==2
+    assert modes.count("substitute")==2
+
+
+def test_probe_scheduler_prioritizes_high_information_candidates():
+    from modules.probe_scheduler import prioritize
+    hot=prioritize(demand_strength=.9,acceleration=.9,anomaly=.8,gap_confidence=.8,uncertainty=.7)
+    cold=prioritize(demand_strength=.1,acceleration=.1,anomaly=.1,gap_confidence=.1,uncertainty=.1)
+    assert hot.priority > cold.priority
+    assert hot.cadence_hours < cold.cadence_hours
+
+
+def test_provider_policy_hard_caps_web_fetches():
+    from datetime import date
+    from modules.provider_policy import ProviderPolicy, AccessMode, may_fetch
+    p=ProviderPolicy("shop",AccessMode.WEB_FETCH,max_fetches_per_day=2)
+    d=date(2026,9,30)
+    assert may_fetch(p,[d],d)
+    assert not may_fetch(p,[d,d],d)
+
+
+def test_refresh_only_triggers_recompute_on_change():
+    from datetime import date
+    from modules.provider_policy import ProviderPolicy, AccessMode, canonical_hash
+    from modules.refresh_orchestrator import refresh_provider
+    p=ProviderPolicy("feed",AccessMode.PUBLIC_FEED,max_fetches_per_day=2)
+    payload={"offers":[1,2,3]}
+    old=canonical_hash(payload)
+    same=refresh_provider(policy=p,fetch=lambda:payload,previous_hash=old,successful_fetch_dates=[],today=date(2026,9,30))
+    assert same.status=="ok" and not same.changed and same.queued==()
+    changed=refresh_provider(policy=p,fetch=lambda:{"offers":[1,2,3,4]},previous_hash=old,successful_fetch_dates=[],today=date(2026,9,30))
+    assert changed.changed and "reclassify_gaps" in changed.queued
+
+
+def test_refresh_failure_never_becomes_empty_snapshot():
+    from datetime import date
+    from modules.provider_policy import ProviderPolicy, AccessMode
+    from modules.refresh_orchestrator import refresh_provider
+    p=ProviderPolicy("shop",AccessMode.WEB_FETCH)
+    def boom(): raise TimeoutError("slow")
+    r=refresh_provider(policy=p,fetch=boom,previous_hash=None,successful_fetch_dates=[],today=date(2026,9,30))
+    assert r.status=="error" and not r.changed
