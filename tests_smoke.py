@@ -219,3 +219,40 @@ def test_v5_saved_views_roundtrip(tmp_path, monkeypatch):
     assert store.list_saved_views()["Mein Markt"]["query"] == "shirt"
     store.delete_view("Mein Markt")
     assert "Mein Markt" not in store.list_saved_views()
+
+
+def test_gap_engine_requires_valid_independent_observations():
+    from modules.opportunity_verification import ProbeResult, ProbeStatus, GapKind, classify_gap
+    failed=[ProbeResult("amazon:exact","amazon","x",ProbeStatus.ERROR,error="timeout")]
+    assert classify_gap(failed).kind == GapKind.DATA_UNKNOWN
+    rows=[
+        ProbeResult("amazon:exact","amazon","x",ProbeStatus.ZERO,result_count=0,relevant_count=0),
+        ProbeResult("amazon:semantic","amazon","x",ProbeStatus.ZERO,result_count=0,relevant_count=0),
+        ProbeResult("ebay:exact","ebay","x",ProbeStatus.ZERO,result_count=0,relevant_count=0),
+        ProbeResult("ebay:semantic","ebay","x",ProbeStatus.ZERO,result_count=0,relevant_count=0),
+    ]
+    gap=classify_gap(rows)
+    assert gap.kind == GapKind.CONFIRMED_ZERO
+    assert set(gap.providers) == {"amazon","ebay"}
+
+
+def test_gap_engine_distinguishes_semantic_gap():
+    from modules.opportunity_verification import ProbeResult, ProbeStatus, GapKind, classify_gap
+    rows=[
+        ProbeResult("amazon:exact","amazon","specific x",ProbeStatus.ZERO,result_count=0,relevant_count=0),
+        ProbeResult("amazon:semantic","amazon","specific x",ProbeStatus.OK,result_count=9,relevant_count=3),
+        ProbeResult("ebay:exact","ebay","specific x",ProbeStatus.ZERO,result_count=0,relevant_count=0),
+        ProbeResult("ebay:semantic","ebay","specific x",ProbeStatus.OK,result_count=5,relevant_count=2),
+    ]
+    assert classify_gap(rows).kind == GapKind.SEMANTIC_GAP
+
+
+def test_query_ladder_is_reproducible():
+    from modules.opportunity_verification import Candidate, build_query_ladder
+    c=Candidate("c1","portable solar widget",lens="marketplace")
+    plan=build_query_ladder(c,["amazon","ebay"],identifiers={"gtin":"123"},synonyms=["solar widget"],substitutes=["power station"])
+    modes=[s.mode for s in plan.steps]
+    assert modes.count("identifier")==2
+    assert modes.count("exact")==2
+    assert modes.count("semantic")==2
+    assert modes.count("substitute")==2
