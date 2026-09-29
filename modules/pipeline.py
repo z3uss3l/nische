@@ -2,7 +2,7 @@ import asyncio
 from .models import SourceResult
 from . import news_fetcher, reddit_fetcher, books_fetcher, trends_fetcher, social_listener, dataforseo_fetcher, keepa_fetcher, scorer
 from . import async_sources
-from . import social_trends_fetcher, youtube_fetcher, commerce_fetcher, web_sources
+from . import social_trends_fetcher, youtube_fetcher, commerce_fetcher, web_sources, germany_sources
 from .normalization import consistency_report, merge_source_results, normalize_result
 from . import db
 
@@ -13,7 +13,7 @@ SOURCE_NAMES = (
     "Google Trends Related", "Google Trends Regions", "DataForSEO", "Keepa",
     "YouTube", "X Trends", "Instagram Hashtags", "Pinterest Trends",
     "Facebook Pages", "Google Shopping", "Local Services", "Configured Feeds",
-    "Configured URLs", "Web Crawler", "Google Autocomplete",
+    "Configured URLs", "Web Crawler", "Google Autocomplete", "GovData", "TED Ausschreibungen", "BA Arbeitsmarkt",
 )
 
 
@@ -54,6 +54,9 @@ async def _run(keyword, region="DE", days=30, max_workers=8):
         web_sources.fetch_configured_urls(keyword),
         web_sources.crawl_configured_sites(keyword),
         web_sources.fetch_google_autocomplete(keyword, region),
+        germany_sources.fetch_govdata(keyword, region),
+        germany_sources.fetch_ted_procurement(keyword, region),
+        germany_sources.fetch_ba_labour_market(region),
     ]
     disabled = db.disabled_sources()
     jobs = [job for name, job in zip(SOURCE_NAMES, jobs) if name not in disabled]
@@ -84,11 +87,13 @@ async def _run(keyword, region="DE", days=30, max_workers=8):
     platform_trends = empty("X Trends").records + empty("Pinterest Trends").records
     shopping = empty("Google Shopping").records
     services = empty("Local Services").records
+    procurement = empty("TED Ausschreibungen").records
     books_source_available = any(empty(n).status in {"ok", "empty"} for n in ("OpenLibrary", "Google Books"))
     score = scorer.calculate_gap_score(
         trends, reddit, books, social, keepa, seo,
         books_source_available=books_source_available, youtube=youtube,
         platform_trends=platform_trends, shopping=shopping, services=services, related_queries=related_queries,
+        procurement=procurement,
     )
     records = merge_source_results(results)
     return {"results": results, "records": records, "score": score,
