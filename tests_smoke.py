@@ -155,3 +155,42 @@ def test_procurement_is_real_demand_signal():
     )
     assert score["procurement_notices"] == 25
     assert score["demand"] > 0
+
+
+def test_temporal_signal_enrichment_is_point_in_time():
+    from datetime import datetime, timezone, timedelta
+    from modules.intelligence_models import TemporalSignal
+    from modules.temporal_intelligence import enrich_signal
+
+    now = datetime(2026, 9, 30, tzinfo=timezone.utc)
+    history = [
+        TemporalSignal(signal_id=f"s{i}", timestamp=now-timedelta(days=i), source="test",
+                       domain="weather", metric="temperature", value=20+i, unit="C",
+                       region="DE-BY", subject="market")
+        for i in range(1, 8)
+    ]
+    future = TemporalSignal(signal_id="future", timestamp=now+timedelta(days=1), source="test",
+                            domain="weather", metric="temperature", value=99, region="DE-BY",
+                            subject="market")
+    current = TemporalSignal(signal_id="now", timestamp=now, source="test", domain="weather",
+                             metric="temperature", value=30, unit="C", region="DE-BY", subject="market")
+    enriched = enrich_signal(current, history + [future])
+    assert enriched.baseline < 99
+    assert enriched.change_1d is not None
+    assert 0 <= enriched.percentile <= 1
+
+
+def test_lagged_relationship_does_not_claim_causality():
+    from datetime import datetime, timezone, timedelta
+    from modules.intelligence_models import TemporalSignal
+    from modules.temporal_intelligence import lagged_correlation
+
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    x = [TemporalSignal(signal_id=f"x{i}", timestamp=start+timedelta(days=i), source="x",
+                        domain="a", metric="x", value=float(i), subject="m") for i in range(20)]
+    y = [TemporalSignal(signal_id=f"y{i}", timestamp=start+timedelta(days=i+2), source="y",
+                        domain="b", metric="y", value=float(i), subject="m") for i in range(20)]
+    rels = lagged_correlation(x, y, 5)
+    best = max(rels, key=lambda r: abs(r["correlation"]))
+    assert best["sample_size"] >= 5
+    assert "causal" not in best
