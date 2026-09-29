@@ -13,7 +13,7 @@ SOURCE_NAMES = (
     "Google Trends Related", "Google Trends Regions", "DataForSEO", "Keepa",
     "YouTube", "X Trends", "Instagram Hashtags", "Pinterest Trends",
     "Facebook Pages", "Google Shopping", "Local Services", "Configured Feeds",
-    "Configured URLs", "Web Crawler",
+    "Configured URLs", "Web Crawler", "Google Autocomplete",
 )
 
 
@@ -53,6 +53,7 @@ async def _run(keyword, region="DE", days=30, max_workers=8):
         web_sources.fetch_configured_feeds(keyword),
         web_sources.fetch_configured_urls(keyword),
         web_sources.crawl_configured_sites(keyword),
+        web_sources.fetch_google_autocomplete(keyword, region),
     ]
     disabled = db.disabled_sources()
     jobs = [job for name, job in zip(SOURCE_NAMES, jobs) if name not in disabled]
@@ -75,7 +76,7 @@ async def _run(keyword, region="DE", days=30, max_workers=8):
     results.sort(key=lambda r: r.source)
     by_source = {r.source: r for r in results}
     empty = lambda n: by_source.get(n, SourceResult(n, "empty"))
-    trends = empty("Google Trends").records; related_queries = empty("Google Trends Related").records; reddit = empty("Reddit").records
+    trends = empty("Google Trends").records; related_queries = empty("Google Trends Related").records + empty("Google Autocomplete").records; reddit = empty("Reddit").records
     books = empty("OpenLibrary").records + empty("Google Books").records
     social = sum((empty(n).records for n in ("X","Octolens","XPOZ","SnitchFeed","Instagram Hashtags","Facebook Pages")), [])
     keepa, seo = empty("Keepa").records, empty("DataForSEO").records
