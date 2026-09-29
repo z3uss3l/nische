@@ -127,3 +127,31 @@ def test_google_autocomplete_discovery(monkeypatch):
     assert result.count >= 3
     assert all(r["kind"] == "related_query" for r in result.records)
     assert all(r["query_type"] == "autocomplete" for r in result.records)
+
+
+def test_german_market_sources(monkeypatch):
+    from modules import germany_sources
+
+    async def fake_json(method, url, **kwargs):
+        if "govdata" in url:
+            return {"result": {"count": 1, "results": [{"id": "d1", "name": "heat-data", "title": "Wärmepumpen Daten", "notes": "Marktdaten", "tags": []}]}}, 5
+        if "ted.europa.eu" in url:
+            return {"totalNoticeCount": 1, "notices": [{"publication-number": "1-2026", "notice-title": "Wärmepumpe", "buyer-name": "Kommune"}]}, 6
+        return [], 4
+
+    monkeypatch.setattr(germany_sources, "request_json_async", fake_json)
+    gov = asyncio.run(germany_sources.fetch_govdata("Wärmepumpe"))
+    ted = asyncio.run(germany_sources.fetch_ted_procurement("Wärmepumpe"))
+    assert gov.status == "ok" and gov.count == 1
+    assert ted.status == "ok" and ted.count == 1
+    assert ted.records[0]["kind"] == "procurement"
+
+
+def test_procurement_is_real_demand_signal():
+    score = calculate_gap_score(
+        trends=[], reddit=[], books=[], social_mentions=[], keepa=[], seo_gaps=[],
+        procurement=[{"id": str(i), "source": "TED Ausschreibungen", "kind": "procurement"} for i in range(25)],
+        books_source_available=False,
+    )
+    assert score["procurement_notices"] == 25
+    assert score["demand"] > 0
