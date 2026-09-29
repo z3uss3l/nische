@@ -1,0 +1,12 @@
+[Unit]
+Description=Refresh Nische snapshots twice daily
+
+[Timer]
+OnCalendar=*-*-* 05:15:00
+OnCalendar=*-*-* 12:15:00
+Persistent=true
+RandomizedDelaySec=600
+Unit=nische-refresh.service
+
+[Install]
+WantedBy=timers.target
