@@ -112,3 +112,18 @@ def test_rss_dublin_core_date_is_parsed():
         '</item></channel></rss>'
     )
     assert entries[0]["date"] == "2026-08-21"
+
+
+def test_google_autocomplete_discovery(monkeypatch):
+    from modules import web_sources
+
+    async def fake_request_text_async(method, url, **kwargs):
+        assert "suggestqueries.google.com" in url
+        return '["test", ["test tool", "test software", "test service"]]', 7
+
+    monkeypatch.setattr(web_sources, "request_text_async", fake_request_text_async)
+    result = asyncio.run(web_sources.fetch_google_autocomplete("test", "DE"))
+    assert result.status == "ok"
+    assert result.count >= 3
+    assert all(r["kind"] == "related_query" for r in result.records)
+    assert all(r["query_type"] == "autocomplete" for r in result.records)
