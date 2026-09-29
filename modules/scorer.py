@@ -15,12 +15,13 @@ def _log_scale(v, ceiling):
 def calculate_gap_score(
     trends, reddit, books, social_mentions=None, keepa=None, seo_gaps=None,
     books_source_available=None, youtube=None, platform_trends=None,
-    shopping=None, services=None, related_queries=None,
+    shopping=None, services=None, related_queries=None, procurement=None,
 ):
     trends, reddit, books = trends or [], reddit or [], books or []
     social_mentions, keepa, seo_gaps = social_mentions or [], keepa or [], seo_gaps or []
     youtube, platform_trends, shopping, services = youtube or [], platform_trends or [], shopping or [], services or []
     related_queries = related_queries or []
+    procurement = procurement or []
 
     # Demand: absolute search volume remains the strongest signal, but high-volume
     # video/social discovery can lift demand without pretending it is search volume.
@@ -32,7 +33,8 @@ def calculate_gap_score(
     x_demand = _log_scale(max(x_counts), 1_000_000) if x_counts else None
     pin_growth = [float(x.get("growth_mom") or 0) for x in platform_trends if x.get("platform") == "Pinterest"]
     pin_demand = _clamp(max(pin_growth) / 100.0) if pin_growth else None
-    demand_signals = [x for x in (seo_demand, video_demand, x_demand, pin_demand) if x is not None]
+    procurement_demand = _log_scale(len(procurement), 100) if procurement else None
+    demand_signals = [x for x in (seo_demand, video_demand, x_demand, pin_demand, procurement_demand) if x is not None]
     demand = _clamp(sum(demand_signals) / len(demand_signals)) if demand_signals else 0.0
 
     pain_signals = []
@@ -83,7 +85,7 @@ def calculate_gap_score(
     score = 10 * weighted
 
     available = {
-        "demand": bool(seo_gaps or youtube or platform_trends),
+        "demand": bool(seo_gaps or youtube or platform_trends or procurement),
         "pain": bool(reddit or social_mentions),
         "supply": bool(books or shopping or keepa),
         "competition": bool(seo_gaps or shopping or keepa),
@@ -109,6 +111,6 @@ def calculate_gap_score(
         "keyword_count": len(seo_gaps), "trend_points": len(trends), "keepa_products": product_count,
         "youtube_videos": len(youtube), "youtube_views": int(sum(video_views)) if video_views else 0,
         "platform_trends": len(platform_trends), "related_queries": len(related_queries), "rising_queries": len([x for x in related_queries if x.get("query_type") == "rising"]), "shopping_offers": len(shopping),
-        "shopping_sellers": seller_count, "service_results": len(services),
+        "shopping_sellers": seller_count, "service_results": len(services), "procurement_notices": len(procurement),
         "weights": WEIGHTS, "available_signals": available,
     }
