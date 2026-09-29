@@ -86,3 +86,13 @@ pytest -q tests_smoke.py
 ```
 
 Die Tests decken Score-Grenzen, Deduplizierung, Pydantic-Validierung, SQLite-WAL/Upsert, Commerce-/Social-Signale sowie Google-Trends-Discovery-Signale ab.
+
+
+## Deutschland-spezifische Marktintelligenz
+
+- **TED Ausschreibungen**: keywordbezogene öffentliche Beschaffungsnachfrage; fließt als eigenes Nachfragesignal in den Score ein.
+- **GovData**: Discovery relevanter deutscher Open-Data-Datensätze und Behördenquellen.
+- **BA Arbeitsmarkt**: amtlicher Arbeitsmarkt-Kontext. Aggregate werden bewusst nicht als keywordbezogene Nachfrage gewertet.
+- **Google Autocomplete**: Long-Tail-/Problem-Discovery, ausdrücklich kein Suchvolumen.
+
+Grundsatz: struktureller Kontext, Discovery-Signale und transaktionale Nachfrage werden getrennt behandelt. Fehlende oder fehlerhafte Quellen werden nicht als Null-Nachfrage interpretiert.
