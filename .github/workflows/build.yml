@@ -5,6 +5,10 @@ on:
     branches:
       - main
 
+  pull_request:
+    branches:
+      - main
+
   workflow_dispatch:
 
 permissions:
@@ -64,7 +68,7 @@ jobs:
 
           if [ -f tests_smoke.py ]; then
             echo "Führe tests_smoke.py aus..."
-            python tests_smoke.py
+            python -m pytest -q tests_smoke.py
 
           elif [ -d tests ]; then
             echo "Führe pytest aus..."
