@@ -256,3 +256,11 @@ def test_query_ladder_is_reproducible():
     assert modes.count("exact")==2
     assert modes.count("semantic")==2
     assert modes.count("substitute")==2
+
+
+def test_probe_scheduler_prioritizes_high_information_candidates():
+    from modules.probe_scheduler import prioritize
+    hot=prioritize(demand_strength=.9,acceleration=.9,anomaly=.8,gap_confidence=.8,uncertainty=.7)
+    cold=prioritize(demand_strength=.1,acceleration=.1,anomaly=.1,gap_confidence=.1,uncertainty=.1)
+    assert hot.priority > cold.priority
+    assert hot.cadence_hours < cold.cadence_hours
