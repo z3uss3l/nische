@@ -194,3 +194,28 @@ def test_lagged_relationship_does_not_claim_causality():
     best = max(rels, key=lambda r: abs(r["correlation"]))
     assert best["sample_size"] >= 5
     assert "causal" not in best
+
+
+def test_v5_filter_removes_irrelevant_records():
+    from datetime import date, datetime
+    from modules.dashboard_v5 import filter_records
+    rows = [
+        {"title":"Goldpreis", "domain":"finance", "region":"DE", "evidence":"official", "timestamp":datetime(2026,9,1)},
+        {"title":"T-Shirt Motiv", "domain":"commerce", "region":"DE", "evidence":"observed", "timestamp":datetime(2026,9,1)},
+    ]
+    out = filter_records(rows, query="gold", domains=["finance"], start=date(2026,8,1), end=date(2026,10,1))
+    assert len(out) == 1
+    assert out[0]["title"] == "Goldpreis"
+
+
+def test_v5_saved_views_roundtrip(tmp_path, monkeypatch):
+    from modules import db
+    from modules import intelligence_store as store
+    dbfile = tmp_path / "views.db"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{dbfile}")
+    db._ENGINE = None
+    store.init_v5()
+    store.save_view("Mein Markt", {"query":"shirt", "domains":["commerce"]})
+    assert store.list_saved_views()["Mein Markt"]["query"] == "shirt"
+    store.delete_view("Mein Markt")
+    assert "Mein Markt" not in store.list_saved_views()
