@@ -8,6 +8,7 @@ Mehrquellen-Analyse für Nischen, Marktchancen und Marktlücken. Der Explorer ko
 - Google Trends
 - Google Trends Related Queries (Top/Rising)
 - Google Trends regional interest
+- Google Autocomplete (keyless Long-Tail-Discovery; kein Suchvolumen)
 - DataForSEO Keyword Ideas
 - GDELT / GNews / TheNewsAPI
 - YouTube Data API v3
@@ -76,6 +77,7 @@ CRAWL_USER_AGENT=Nischen-Explorer/4.0 (+respectful crawler)
 - Pinterest Trends ist laut aktueller API-Dokumentation in der Verfügbarkeit eingeschränkt.
 - X Trends erfordern einen Zugang, der den Trends-Endpunkt tatsächlich freischaltet.
 - YouTube API-Aufrufe unterliegen Quoten.
+- Google Autocomplete ist ein Discovery-Signal und darf nicht als Search-Volume-Messung interpretiert werden.
 
 ## Tests
 
