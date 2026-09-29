@@ -181,3 +181,71 @@ async def crawl_configured_sites(keyword: str, timeout: int = 20):
                 continue
     return SourceResult("Web Crawler", "ok" if records else "empty", records,
                         latency_ms=sum(latencies) if latencies else 0, total_available=len(records))
+
+
+async def fetch_google_autocomplete(keyword: str, region: str = "DE", timeout: int = 15):
+    """Keyless keyword-discovery source using Google's public suggestion endpoint.
+
+    This is a discovery signal only. It does not represent search volume.
+    """
+    keyword = (keyword or "").strip()
+    if not keyword:
+        return SourceResult("Google Autocomplete", "empty")
+
+    hl = {
+        "DE": "de", "AT": "de", "CH": "de", "GB": "en", "US": "en",
+        "FR": "fr", "IT": "it", "ES": "es", "NL": "nl",
+    }.get((region or "DE").upper(), "en")
+
+    seeds = [keyword]
+    # Cheap long-tail expansion without combinatorial explosion.
+    seeds += [f"{keyword} {suffix}" for suffix in (
+        "für", "ohne", "mit", "kosten", "preis", "problem", "alternative",
+        "software", "tool", "service", "beratung"
+    )]
+
+    records = []
+    seen = set()
+    total_latency = 0
+    for seed in seeds[:12]:
+        try:
+            data_text, latency = await request_text_async(
+                "GET",
+                "https://suggestqueries.google.com/complete/search",
+                params={"client": "firefox", "hl": hl, "q": seed},
+                headers={"User-Agent": os.getenv("CRAWL_USER_AGENT", "Nischen-Explorer/4.0")},
+                timeout=timeout,
+            )
+            total_latency += latency
+            import json
+            payload = json.loads(data_text)
+            suggestions = payload[1] if isinstance(payload, list) and len(payload) > 1 else []
+            for rank, suggestion in enumerate(suggestions[:10], 1):
+                suggestion = str(suggestion).strip()
+                key = suggestion.casefold()
+                if not suggestion or key in seen:
+                    continue
+                seen.add(key)
+                records.append({
+                    "id": f"{seed}:{suggestion}",
+                    "source": "Google Autocomplete",
+                    "kind": "related_query",
+                    "title": suggestion,
+                    "keyword": suggestion,
+                    "query_type": "autocomplete",
+                    "seed": seed,
+                    "rank": rank,
+                    "region": region,
+                    "url": f"https://www.google.com/search?q={quote(suggestion)}",
+                    "date": datetime.now(timezone.utc).isoformat(),
+                })
+        except Exception:
+            continue
+
+    return SourceResult(
+        "Google Autocomplete",
+        "ok" if records else "empty",
+        records,
+        latency_ms=total_latency,
+        total_available=len(records),
+    )
